@@ -1,0 +1,9 @@
+{application, phantom,
+ [{description, "Fault-tolerant distributed message broker"},
+  {vsn, "0.1.0"},
+  {registered, [phantom_sup, phantom_registry]},
+  {mod, {phantom_app, []}},
+  {applications, [kernel, stdlib, crypto]},
+  {env, [{data_dir, "data"}, {max_queue, 10000}]},
+  {modules, []}
+ ]}.
