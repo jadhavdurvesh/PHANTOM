@@ -6,5 +6,5 @@ start_broker(Topic) ->
     supervisor:start_child(?MODULE, [Topic]).
 init([]) ->
     Child = #{id => phantom_broker, start => {phantom_broker, start_link, []},
-      restart => permanent, shutdown => 5000, type => worker, modules => [phantom_broker]},
+      restart => temporary, shutdown => 5000, type => worker, modules => [phantom_broker]},
     {ok, {{simple_one_for_one, 10, 10}, [Child]}}.
