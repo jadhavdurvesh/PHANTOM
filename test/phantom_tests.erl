@@ -63,3 +63,37 @@ consumer_crash_redelivery_test_() ->
           ?assert(false)
         end
       end}.
+
+persistent_journal_recovery_test_() ->
+    {setup,
+      fun() ->
+        Dir = filename:join("/tmp", "phantom-journal-" ++ integer_to_list(erlang:unique_integer([positive]))),
+        application:load(phantom),
+        application:set_env(phantom, data_dir, Dir),
+        {ok, _} = application:ensure_all_started(phantom),
+        Dir
+      end,
+      fun(Dir) ->
+        application:stop(phantom),
+        _ = file:del_dir_r(Dir),
+        ok
+      end,
+      fun(_Dir) ->
+        Topic = <<"persistent.audit">>,
+        {ok, Id} = phantom:publish(Topic, #{value => 99}, #{persistent => true}),
+        application:stop(phantom),
+        {ok, _} = application:ensure_all_started(phantom),
+        {ok, _Pid} = phantom:ensure_topic(Topic),
+        Stats = phantom:stats(Topic),
+        ?assertEqual(1, maps:get(queued, Stats)),
+        ok = phantom:subscribe(Topic, self()),
+        receive
+          {phantom_message, Topic, Id, #{value := 99}} ->
+            ?assertEqual(ok, phantom:ack(Topic, Id))
+        after 1000 -> ?assert(false)
+        end,
+        application:stop(phantom),
+        {ok, _} = application:ensure_all_started(phantom),
+        {ok, _} = phantom:ensure_topic(Topic),
+        ?assertEqual(0, maps:get(queued, phantom:stats(Topic)))
+      end}.
