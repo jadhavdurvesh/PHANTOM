@@ -17,8 +17,10 @@
 - [ ] Consumer prefetch and fair dispatch
 - [ ] Retry limits and dead-letter queues
 - [ ] Message TTL and expiration
-- [ ] Durable journal replay and recovery
-- [ ] Journal checksums, fsync policy and compaction
+- [x] Framed journal records with topic-scoped acknowledgement events
+- [x] Journal replay for unacknowledged persistent messages
+- [x] Per-record file sync
+- [ ] Journal checksums and compaction
 - [ ] Per-topic quotas and rate limits
 
 ## M2 — Distribution
