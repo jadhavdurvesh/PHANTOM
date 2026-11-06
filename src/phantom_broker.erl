@@ -48,7 +48,7 @@ handle_call({ack, Id}, _From, State) ->
       error -> {reply, {error, unknown_message}, State};
       {ok, Entry} ->
         Message = maps:get(message, Entry),
-        case persist_event({ack, Id}, maps:get(persistent, Message, false)) of
+        case persist_event({ack, State#state.topic, Id}, maps:get(persistent, Message, false)) of
           ok ->
             erlang:demonitor(maps:get(monitor, Entry), [flush]),
             maps:get(consumer, Entry) ! {phantom_acked, Id},
@@ -125,7 +125,7 @@ replay_records(<<Length:32/unsigned-big, Rest/binary>>, Topic, Queue, NextId)
     try binary_to_term(Encoded, [safe]) of
       {publish, #{id := Id, topic := Topic}=Message} when is_integer(Id), Id > 0 ->
         replay_records(Tail, Topic, queue:in(Message, Queue), max(NextId, Id+1));
-      {ack, Id} when is_integer(Id) ->
+      {ack, Topic, Id} when is_integer(Id) ->
         replay_records(Tail, Topic, queue:from_list([M || M <- queue:to_list(Queue), maps:get(id,M) =/= Id]), NextId);
       {publish, _Other} -> replay_records(Tail, Topic, Queue, NextId);
       _ -> {error, invalid_journal_record}
