@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -export([start_link/1, publish/3, subscribe/2, ack/2, stats/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--record(state, {topic, queue = queue:new(), subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000}).
+-record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000}).
 start_link(Topic) -> gen_server:start_link(?MODULE, Topic, []).
 publish(Pid, Payload, Options) -> gen_server:call(Pid, {publish, Payload, Options}).
 subscribe(Pid, Consumer) -> gen_server:call(Pid, {subscribe, Consumer}).
@@ -11,7 +11,7 @@ stats(Pid) -> gen_server:call(Pid, stats).
 init(Topic) ->
     process_flag(trap_exit, true),
     Max = application:get_env(phantom, max_queue, 10000),
-    {ok, #state{topic=Topic, max_queue=Max}}.
+    {ok, #state{topic=Topic, queue=queue:new(), max_queue=Max}}.
 handle_call({subscribe, Consumer}, _From, State) when is_pid(Consumer) ->
     Ref = erlang:monitor(process, Consumer),
     Subs = maps:put(Consumer, Ref, State#state.subscribers),
@@ -33,7 +33,7 @@ handle_call({publish, Payload, Options}, _From, State) when is_map(Options) ->
 handle_call({ack, Id}, _From, State) ->
     case maps:take(Id, State#state.inflight) of
       error -> {reply, {error, unknown_message}, State};
-      {#{monitor := Ref, consumer := Consumer, message := Message}, Rest} ->
+      {#{monitor := Ref, consumer := Consumer}, Rest} ->
         erlang:demonitor(Ref, [flush]),
         Consumer ! {phantom_acked, Id},
         {reply, ok, State#state{inflight=Rest}}
@@ -58,7 +58,7 @@ handle_info(_Info, State) -> {noreply, State}.
 terminate(_Reason, _State) -> ok.
 code_change(_Old, State, _Extra) -> {ok, State}.
 
-dispatch(State=#state{subscribers=Subs, queue=Queue}) when map_size(Subs) =:= 0 -> State;
+dispatch(State=#state{subscribers=Subs}) when map_size(Subs) =:= 0 -> State;
 dispatch(State=#state{queue=Queue, subscribers=Subs, inflight=Inflight}) ->
     case queue:out(Queue) of
       {empty, _} -> State;
