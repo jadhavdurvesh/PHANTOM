@@ -43,7 +43,7 @@ handle_call(stats, _From, State) ->
               inflight => map_size(State#state.inflight), subscribers => map_size(State#state.subscribers)}, State};
 handle_call(_Request, _From, State) -> {reply, {error, bad_request}, State}.
 handle_cast(_Message, State) -> {noreply, State}.
-handle_info({'DOWN', Ref, process, Consumer, _Reason}, State) ->
+handle_info({'DOWN', _Ref, process, Consumer, _Reason}, State) ->
     Subs = maps:remove(Consumer, State#state.subscribers),
     {Retry, Keep} = maps:fold(fun(Id, Entry, {R,K}) ->
       case maps:get(consumer, Entry) =:= Consumer of
