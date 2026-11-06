@@ -16,7 +16,7 @@ Each broker has a configurable maximum queued-message count. Publish returns que
 
 ## Persistence
 
-Persistent publish appends a serialized term to a local journal. This is not yet a write-ahead log with recovery guarantees. A production implementation must define record framing, checksums, fsync semantics, replay, truncation handling, compaction and ownership during failover.
+Persistent publish appends a length-prefixed external term to a local journal and syncs the file. Acknowledgements append topic-scoped ack records. On startup, each topic broker replays the journal and restores only unacknowledged persistent messages. Invalid or truncated records stop broker startup instead of being silently ignored. The journal currently has no checksum or compaction, and it is not replicated; disk exhaustion and multi-node ownership still require explicit operational policy.
 
 ## Distribution
 
