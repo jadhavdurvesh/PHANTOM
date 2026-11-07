@@ -66,7 +66,7 @@ Each broker is a gen_server. Consumers are ordinary Erlang processes monitored b
 ## Current limitations
 
 - Single-node runtime; distributed cluster membership and replicated state are not implemented.
-- The current dispatcher selects one subscriber per delivery and does not yet implement competing-consumer fairness or broadcast fan-out.
+- Dispatch currently provides round-robin competing-consumer delivery; broadcast fan-out and consumer prefetch are not implemented.
 - Persistent journal replay and crash-consistent recovery are not implemented.
 - No network protocol or remote client API yet.
 - Queue limits are per broker and currently count queued, not in-flight, messages.
