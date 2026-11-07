@@ -76,3 +76,11 @@ See ROADMAP.md and docs/design.md.
 ## License
 
 MIT.
+
+## Consumer dispatch
+
+Each message is delivered to one subscribed consumer. When several consumers subscribe to the same topic, PHANTOM now distributes successive deliveries in deterministic round-robin order. This is competing-consumer behavior, not broadcast fan-out: each message is delivered to one consumer in the group. Unacknowledged messages are redelivered after the consumer process exits.
+
+## Persistence boundary
+
+Persistent publishes and acknowledgements are appended to a length-prefixed journal, synced to disk, and replayed on broker startup. Recovery restores only persistent messages that have not been acknowledged. The journal is local to one node; it is not replicated, compacted, or protected by a cryptographic integrity mechanism. It should not be treated as a distributed durable log.
