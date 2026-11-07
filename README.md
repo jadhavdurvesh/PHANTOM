@@ -84,3 +84,5 @@ Each message is delivered to one subscribed consumer. When several consumers sub
 ## Persistence boundary
 
 Persistent publishes and acknowledgements are appended to a length-prefixed journal, synced to disk, and replayed on broker startup. Recovery restores only persistent messages that have not been acknowledged. The journal is local to one node; it is not replicated, compacted, or protected by a cryptographic integrity mechanism. It should not be treated as a distributed durable log.
+
+The broker supports a configurable `prefetch_per_consumer` application setting (default 10). A consumer cannot hold more than that many unacknowledged deliveries; queued messages remain buffered until an acknowledgement or consumer recovery frees capacity. This is per-topic broker backpressure, not a global memory quota.
