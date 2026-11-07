@@ -88,3 +88,8 @@ Persistent publishes and acknowledgements are appended to a length-prefixed jour
 The broker supports a configurable `prefetch_per_consumer` application setting (default 10). A consumer cannot hold more than that many unacknowledged deliveries; queued messages remain buffered until an acknowledgement or consumer recovery frees capacity. This is per-topic broker backpressure, not a global memory quota.
 
 A configurable `max_delivery_attempts` limit (default 5) now bounds redelivery after a consumer process crashes. Once the delivery count reaches the limit, the message is moved to an in-memory dead-letter list exposed through `phantom:dead_letters/1`; broker stats include the dead-letter count. Dead letters are currently process-memory state and are not restored after broker restart, so this is not yet a durable dead-letter queue.
+
+- Configurable maximum delivery attempts and dead-letter inspection for exhausted consumer-crash redeliveries
+
+Dead-letter records are currently held in broker memory only; they are not journaled and will not survive broker restart. Persistent publish/ack replay does not yet provide durable dead-letter retention.
+
