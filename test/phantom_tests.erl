@@ -133,3 +133,35 @@ round_robin_consumer_fairness_test_() ->
         exit(A, kill),
         exit(B, kill)
       end}.
+
+
+consumer_prefetch_limit_test_() ->
+    {setup,
+      fun() ->
+        application:load(phantom),
+        application:set_env(phantom, prefetch_per_consumer, 1),
+        {ok, _} = application:ensure_all_started(phantom),
+        ok
+      end,
+      fun(_) -> application:stop(phantom) end,
+      fun(_) ->
+        Topic = <<"prefetch.single">>,
+        ok = phantom:subscribe(Topic, self()),
+        {ok, First} = phantom:publish(Topic, first, #{}),
+        {ok, Second} = phantom:publish(Topic, second, #{}),
+        receive
+          {phantom_message, Topic, First, first} ->
+            receive
+              {phantom_message, Topic, Second, second} ->
+                ?assert(false)
+            after 100 -> ok
+            end,
+            ?assertEqual(ok, phantom:ack(Topic, First)),
+            receive
+              {phantom_message, Topic, Second, second} ->
+                ?assertEqual(ok, phantom:ack(Topic, Second))
+            after 1000 -> ?assert(false)
+            end
+        after 1000 -> ?assert(false)
+        end
+      end}.
