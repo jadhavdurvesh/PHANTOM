@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -export([start_link/1, publish/3, subscribe/2, ack/2, stats/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000, prefetch = 10, rr_cursor = 0}).
+-record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000, prefetch = 10, max_delivery_attempts = 5, dead_letters = [], rr_cursor = 0}).
 
 start_link(Topic) -> gen_server:start_link(?MODULE, Topic, []).
 publish(Pid, Payload, Options) -> gen_server:call(Pid, {publish, Payload, Options}).
@@ -14,9 +14,10 @@ init(Topic) ->
     process_flag(trap_exit, true),
     Max = application:get_env(phantom, max_queue, 10000),
     Prefetch = max(1, application:get_env(phantom, prefetch_per_consumer, 10)),
+    MaxAttempts = max(1, application:get_env(phantom, max_delivery_attempts, 5)),
     case recover_journal(Topic) of
       {ok, Messages, NextId} ->
-        {ok, #state{topic=Topic, queue=queue:from_list(Messages), max_queue=Max, prefetch=Prefetch, next_id=NextId}};
+        {ok, #state{topic=Topic, queue=queue:from_list(Messages), max_queue=Max, prefetch=Prefetch, max_delivery_attempts=MaxAttempts, next_id=NextId}};
       {error, Reason} -> {stop, {journal_recovery_failed, Reason}}
     end.
 
@@ -59,20 +60,26 @@ handle_call({ack, Id}, _From, State) ->
     end;
 handle_call(stats, _From, State) ->
     {reply, #{topic => State#state.topic, queued => queue:len(State#state.queue),
-              inflight => map_size(State#state.inflight), subscribers => map_size(State#state.subscribers), prefetch_per_consumer => State#state.prefetch}, State};
+              inflight => map_size(State#state.inflight), subscribers => map_size(State#state.subscribers), prefetch_per_consumer => State#state.prefetch, dead_letters => length(State#state.dead_letters)}, State};
 handle_call(_Request, _From, State) -> {reply, {error, bad_request}, State}.
 
 handle_cast(_Message, State) -> {noreply, State}.
 handle_info({'DOWN', _Ref, process, Consumer, _Reason}, State) ->
     Subs = maps:remove(Consumer, State#state.subscribers),
-    {Retry, Keep} = maps:fold(fun(Id, Entry, {R,K}) ->
+    {Retry, Keep, Dead} = maps:fold(fun(Id, Entry, {R,K,D}) ->
       case maps:get(consumer, Entry) =:= Consumer of
-        true -> {[{Id,maps:get(message,Entry)}|R], K};
-        false -> {R,maps:put(Id,Entry,K)}
+        true ->
+          Message = maps:get(message,Entry),
+          Attempts = maps:get(attempts, Message, 1),
+          case Attempts >= State#state.max_delivery_attempts of
+            true -> {R,K,[Message#{dead_letter_reason => consumer_crash, dead_lettered_at => erlang:system_time(millisecond)}|D]};
+            false -> {[{Id,Message}|R], K, D}
+          end;
+        false -> {R,maps:put(Id,Entry,K),D}
       end
-    end, {[],#{}}, State#state.inflight),
+    end, {[],#{},State#state.dead_letters}, State#state.inflight),
     State1 = lists:foldl(fun({_Id,Message},Acc) -> Acc#state{queue=queue:in_r(Message,Acc#state.queue)} end,
-                         State#state{inflight=Keep,subscribers=Subs}, Retry),
+                         State#state{inflight=Keep,subscribers=Subs,dead_letters=Dead}, Retry),
     {noreply, dispatch(State1)};
 handle_info(_Info, State) -> {noreply, State}.
 terminate(_Reason, _State) -> ok.
@@ -92,8 +99,9 @@ dispatch(State=#state{queue=Queue, subscribers=Subs, inflight=Inflight, rr_curso
             Consumer = lists:nth(Position, Eligible),
             Ref = erlang:monitor(process, Consumer),
             Id = maps:get(id, Message),
+            Delivered = Message#{attempts => maps:get(attempts, Message, 0) + 1},
             Consumer ! {phantom_message, maps:get(topic,Message), Id, maps:get(payload,Message)},
-            Entry = #{consumer=>Consumer, monitor=>Ref, message=>Message},
+            Entry = #{consumer=>Consumer, monitor=>Ref, message=>Delivered},
             dispatch(State#state{queue=Rest,inflight=maps:put(Id,Entry,Inflight),rr_cursor=Cursor+1})
         end
     end.
