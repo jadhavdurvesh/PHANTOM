@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -export([start_link/1, publish/3, subscribe/2, ack/2, stats/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000, rr_cursor = 0}).
+-record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000, prefetch = 10, rr_cursor = 0}).
 
 start_link(Topic) -> gen_server:start_link(?MODULE, Topic, []).
 publish(Pid, Payload, Options) -> gen_server:call(Pid, {publish, Payload, Options}).
@@ -13,9 +13,10 @@ stats(Pid) -> gen_server:call(Pid, stats).
 init(Topic) ->
     process_flag(trap_exit, true),
     Max = application:get_env(phantom, max_queue, 10000),
+    Prefetch = max(1, application:get_env(phantom, prefetch_per_consumer, 10)),
     case recover_journal(Topic) of
       {ok, Messages, NextId} ->
-        {ok, #state{topic=Topic, queue=queue:from_list(Messages), max_queue=Max, next_id=NextId}};
+        {ok, #state{topic=Topic, queue=queue:from_list(Messages), max_queue=Max, prefetch=Prefetch, next_id=NextId}};
       {error, Reason} -> {stop, {journal_recovery_failed, Reason}}
     end.
 
@@ -52,13 +53,13 @@ handle_call({ack, Id}, _From, State) ->
           ok ->
             erlang:demonitor(maps:get(monitor, Entry), [flush]),
             maps:get(consumer, Entry) ! {phantom_acked, Id},
-            {reply, ok, State#state{inflight=maps:remove(Id, State#state.inflight)}};
+            {reply, ok, dispatch(State#state{inflight=maps:remove(Id, State#state.inflight)})};
           Error -> {reply, Error, State}
         end
     end;
 handle_call(stats, _From, State) ->
     {reply, #{topic => State#state.topic, queued => queue:len(State#state.queue),
-              inflight => map_size(State#state.inflight), subscribers => map_size(State#state.subscribers)}, State};
+              inflight => map_size(State#state.inflight), subscribers => map_size(State#state.subscribers), prefetch_per_consumer => State#state.prefetch}, State};
 handle_call(_Request, _From, State) -> {reply, {error, bad_request}, State}.
 
 handle_cast(_Message, State) -> {noreply, State}.
@@ -78,20 +79,29 @@ terminate(_Reason, _State) -> ok.
 code_change(_Old, State, _Extra) -> {ok, State}.
 
 dispatch(State=#state{subscribers=Subs}) when map_size(Subs) =:= 0 -> State;
-dispatch(State=#state{queue=Queue, subscribers=Subs, inflight=Inflight, rr_cursor=Cursor}) ->
+dispatch(State=#state{queue=Queue, subscribers=Subs, inflight=Inflight, rr_cursor=Cursor, prefetch=Prefetch}) ->
     case queue:out(Queue) of
       {empty, _} -> State;
       {{value, Message}, Rest} ->
-        Consumers = lists:sort(maps:keys(Subs)),
-        Count = length(Consumers),
-        Position = (Cursor rem Count) + 1,
-        Consumer = lists:nth(Position, Consumers),
-        Ref = erlang:monitor(process, Consumer),
-        Id = maps:get(id, Message),
-        Consumer ! {phantom_message, maps:get(topic,Message), Id, maps:get(payload,Message)},
-        Entry = #{consumer=>Consumer, monitor=>Ref, message=>Message},
-        dispatch(State#state{queue=Rest,inflight=maps:put(Id,Entry,Inflight),rr_cursor=Cursor+1})
+        Eligible = lists:sort([Pid || Pid <- maps:keys(Subs), consumer_inflight(Pid, Inflight) < Prefetch]),
+        case Eligible of
+          [] -> State;
+          _ ->
+            Count = length(Eligible),
+            Position = (Cursor rem Count) + 1,
+            Consumer = lists:nth(Position, Eligible),
+            Ref = erlang:monitor(process, Consumer),
+            Id = maps:get(id, Message),
+            Consumer ! {phantom_message, maps:get(topic,Message), Id, maps:get(payload,Message)},
+            Entry = #{consumer=>Consumer, monitor=>Ref, message=>Message},
+            dispatch(State#state{queue=Rest,inflight=maps:put(Id,Entry,Inflight),rr_cursor=Cursor+1})
+        end
     end.
+
+consumer_inflight(Consumer, Inflight) ->
+    maps:fold(fun(_Id, Entry, Count) ->
+      case maps:get(consumer, Entry) =:= Consumer of true -> Count+1; false -> Count end
+    end, 0, Inflight).
 
 journal_path() ->
     Dir = application:get_env(phantom, data_dir, "data"),
