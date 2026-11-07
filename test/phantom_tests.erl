@@ -10,7 +10,7 @@ broker_publish_ack_test_() ->
         ok
       end,
       fun(_) -> application:stop(phantom) end,
-      fun(_) ->
+      fun(_) -> fun() ->
         Topic = <<"eunit.events">>,
         ok = phantom:subscribe(Topic, self()),
         {ok, Id} = phantom:publish(Topic, #{event => created}, #{}),
@@ -22,7 +22,7 @@ broker_publish_ack_test_() ->
         end,
         Stats = phantom:stats(Topic),
         ?assertEqual(0, maps:get(inflight, Stats))
-      end}.
+      end end}.
 
 unknown_topic_ack_test() ->
     application:load(phantom),
@@ -41,7 +41,7 @@ consumer_crash_redelivery_test_() ->
         ok
       end,
       fun(_) -> application:stop(phantom) end,
-      fun(_) ->
+      fun(_) -> fun() ->
         Topic = <<"eunit.redelivery">>,
         Parent = self(),
         Consumer = spawn(fun() ->
@@ -62,7 +62,7 @@ consumer_crash_redelivery_test_() ->
         after 1000 ->
           ?assert(false)
         end
-      end}.
+      end end}.
 
 persistent_journal_recovery_test_() ->
     {setup,
@@ -78,7 +78,7 @@ persistent_journal_recovery_test_() ->
         _ = file:del_dir_r(Dir),
         ok
       end,
-      fun(_Dir) ->
+      fun(_) -> fun() ->
         Topic = <<"persistent.audit">>,
         {ok, Id} = phantom:publish(Topic, #{value => 99}, #{persistent => true}),
         application:stop(phantom),
@@ -96,7 +96,7 @@ persistent_journal_recovery_test_() ->
         {ok, _} = application:ensure_all_started(phantom),
         {ok, _} = phantom:ensure_topic(Topic),
         ?assertEqual(0, maps:get(queued, phantom:stats(Topic)))
-      end}.
+      end end}.
 
 
 round_robin_consumer_fairness_test_() ->
@@ -107,7 +107,7 @@ round_robin_consumer_fairness_test_() ->
         ok
       end,
       fun(_) -> application:stop(phantom) end,
-      fun(_) ->
+      fun(_) -> fun() ->
         Topic = <<"fairness.round_robin">>,
         Parent = self(),
         Consumer = fun(Name) ->
@@ -132,7 +132,7 @@ round_robin_consumer_fairness_test_() ->
         end after 1000 -> ?assert(false) end,
         exit(A, kill),
         exit(B, kill)
-      end}.
+      end end}.
 
 
 consumer_prefetch_limit_test_() ->
@@ -144,7 +144,7 @@ consumer_prefetch_limit_test_() ->
         ok
       end,
       fun(_) -> application:stop(phantom) end,
-      fun(_) ->
+      fun(_) -> fun() ->
         Topic = <<"prefetch.single">>,
         ok = phantom:subscribe(Topic, self()),
         {ok, First} = phantom:publish(Topic, first, #{}),
@@ -164,7 +164,7 @@ consumer_prefetch_limit_test_() ->
             end
         after 1000 -> ?assert(false)
         end
-      end}.
+      end end}.
 
 consumer_crash_dead_letter_test_() ->
     {setup,
@@ -175,7 +175,7 @@ consumer_crash_dead_letter_test_() ->
         ok
       end,
       fun(_) -> application:stop(phantom) end,
-      fun(_) ->
+      fun(_) -> fun() ->
         Topic = <<"dead-letter.crash">>,
         Parent = self(),
         Consumer = spawn(fun() ->
@@ -191,4 +191,4 @@ consumer_crash_dead_letter_test_() ->
         ?assertEqual(1, length(Dead)),
         [Entry] = Dead,
         ?assertEqual(consumer_crash, maps:get(dead_letter_reason, Entry))
-      end}.
+      end end}.
