@@ -38,3 +38,5 @@
 - [ ] Authentication and authorization
 - [ ] TLS transport
 - [ ] Rolling upgrades and operational runbooks
+
+- [x] Deterministic round-robin dispatch across competing consumers
