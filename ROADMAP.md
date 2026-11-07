@@ -40,3 +40,5 @@
 - [ ] Rolling upgrades and operational runbooks
 
 - [x] Deterministic round-robin dispatch across competing consumers
+
+- [x] Configurable per-consumer prefetch limit and acknowledgement-driven dispatch backpressure
