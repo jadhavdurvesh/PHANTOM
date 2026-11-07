@@ -4,6 +4,6 @@
   {registered, [phantom_sup, phantom_registry]},
   {mod, {phantom_app, []}},
   {applications, [kernel, stdlib, crypto]},
-  {env, [{data_dir, "data"}, {max_queue, 10000}, {prefetch_per_consumer, 10}]},
+  {env, [{data_dir, "data"}, {max_queue, 10000}, {prefetch_per_consumer, 10}, {max_delivery_attempts, 5}]},
   {modules, []}
  ]}.
