@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -export([start_link/1, publish/3, subscribe/2, ack/2, stats/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000}).
+-record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000, rr_cursor = 0}).
 
 start_link(Topic) -> gen_server:start_link(?MODULE, Topic, []).
 publish(Pid, Payload, Options) -> gen_server:call(Pid, {publish, Payload, Options}).
@@ -78,16 +78,19 @@ terminate(_Reason, _State) -> ok.
 code_change(_Old, State, _Extra) -> {ok, State}.
 
 dispatch(State=#state{subscribers=Subs}) when map_size(Subs) =:= 0 -> State;
-dispatch(State=#state{queue=Queue, subscribers=Subs, inflight=Inflight}) ->
+dispatch(State=#state{queue=Queue, subscribers=Subs, inflight=Inflight, rr_cursor=Cursor}) ->
     case queue:out(Queue) of
       {empty, _} -> State;
       {{value, Message}, Rest} ->
-        [{Consumer,_}|_] = maps:to_list(Subs),
+        Consumers = lists:sort(maps:keys(Subs)),
+        Count = length(Consumers),
+        Position = (Cursor rem Count) + 1,
+        Consumer = lists:nth(Position, Consumers),
         Ref = erlang:monitor(process, Consumer),
         Id = maps:get(id, Message),
         Consumer ! {phantom_message, maps:get(topic,Message), Id, maps:get(payload,Message)},
         Entry = #{consumer=>Consumer, monitor=>Ref, message=>Message},
-        dispatch(State#state{queue=Rest,inflight=maps:put(Id,Entry,Inflight)})
+        dispatch(State#state{queue=Rest,inflight=maps:put(Id,Entry,Inflight),rr_cursor=Cursor+1})
     end.
 
 journal_path() ->
