@@ -42,3 +42,5 @@
 - [x] Deterministic round-robin dispatch across competing consumers
 
 - [x] Configurable per-consumer prefetch limit and acknowledgement-driven dispatch backpressure
+
+A configurable `max_delivery_attempts` limit (default 5) now bounds redelivery after a consumer process crashes. Once the delivery count reaches the limit, the message is moved to an in-memory dead-letter list exposed through `phantom:dead_letters/1`; broker stats include the dead-letter count. Dead letters are currently process-memory state and are not restored after broker restart, so this is not yet a durable dead-letter queue.
