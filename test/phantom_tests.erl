@@ -97,3 +97,39 @@ persistent_journal_recovery_test_() ->
         {ok, _} = phantom:ensure_topic(Topic),
         ?assertEqual(0, maps:get(queued, phantom:stats(Topic)))
       end}.
+
+
+round_robin_consumer_fairness_test_() ->
+    {setup,
+      fun() ->
+        application:load(phantom),
+        {ok, _} = application:ensure_all_started(phantom),
+        ok
+      end,
+      fun(_) -> application:stop(phantom) end,
+      fun(_) ->
+        Topic = <<"fairness.round_robin">>,
+        Parent = self(),
+        Consumer = fun(Name) ->
+          spawn(fun Loop() ->
+            receive
+              {phantom_message, Topic, Id, Payload} ->
+                Parent ! {delivered, Name, Id, Payload},
+                Loop()
+            end
+          end)
+        end,
+        A = Consumer(a),
+        B = Consumer(b),
+        ok = phantom:subscribe(Topic, A),
+        ok = phantom:subscribe(Topic, B),
+        {ok, _} = phantom:publish(Topic, first, #{}),
+        {ok, _} = phantom:publish(Topic, second, #{}),
+        receive {delivered, Name1, _, _} -> receive
+          {delivered, Name2, _, _} ->
+            ?assertNotEqual(Name1, Name2)
+          after 1000 -> ?assert(false)
+        end after 1000 -> ?assert(false) end,
+        exit(A, kill),
+        exit(B, kill)
+      end}.
