@@ -29,3 +29,5 @@ The supervision tree restarts failed brokers. The topic registry monitors broker
 ## Consumer prefetch
 
 The broker limits each subscriber's in-flight deliveries using `prefetch_per_consumer` (default 10, minimum 1). Dispatch skips consumers at their limit and leaves messages queued. Acknowledgement or consumer recovery triggers another dispatch pass. This bounds outstanding deliveries per consumer, but does not cap total in-flight messages across all consumers or provide global byte-based memory quotas.
+
+A configurable `max_delivery_attempts` limit (default 5) now bounds redelivery after a consumer process crashes. Once the delivery count reaches the limit, the message is moved to an in-memory dead-letter list exposed through `phantom:dead_letters/1`; broker stats include the dead-letter count. Dead letters are currently process-memory state and are not restored after broker restart, so this is not yet a durable dead-letter queue.
