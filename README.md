@@ -47,7 +47,7 @@ This is **at-least-once delivery**, not exactly-once delivery. Consumers should 
 
 ## Persistence boundary
 
-Publishing with the option map #{persistent => true} appends a serialized Erlang term to the configured journal file. The current milestone does not replay the journal after restart, compact it, fsync every record, or coordinate journal state across nodes. It is an append-only persistence experiment, not yet a durable queue guarantee.
+Publishing with the option map `#{persistent => true}` appends a serialized Erlang term to the configured journal file. Persistent records are replayed on broker restart and each record is synced. The journal is local, append-only, and not replicated or compacted; it is not a distributed durability guarantee.
 
 ## Architecture
 
