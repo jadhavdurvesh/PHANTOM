@@ -25,3 +25,7 @@ The current broker is single-node. Erlang distribution, node membership, partiti
 ## Failure domains
 
 The supervision tree restarts failed brokers. The topic registry monitors broker PIDs and removes stale entries. Consumer death triggers redelivery for that consumer's outstanding messages. A broker crash currently loses its in-memory queue; durable replay is not yet available.
+
+## Consumer prefetch
+
+The broker limits each subscriber's in-flight deliveries using `prefetch_per_consumer` (default 10, minimum 1). Dispatch skips consumers at their limit and leaves messages queued. Acknowledgement or consumer recovery triggers another dispatch pass. This bounds outstanding deliveries per consumer, but does not cap total in-flight messages across all consumers or provide global byte-based memory quotas.
