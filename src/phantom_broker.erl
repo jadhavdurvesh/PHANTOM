@@ -151,6 +151,8 @@ replay_records(<<Length:32/unsigned-big, Rest/binary>>, Topic, Queue, NextId)
         replay_records(Tail, Topic, queue:in(Message, Queue), max(NextId, Id+1));
       {ack, Topic, Id} when is_integer(Id) ->
         replay_records(Tail, Topic, queue:from_list([M || M <- queue:to_list(Queue), maps:get(id,M) =/= Id]), NextId);
+      {ack, _OtherTopic, _Id} ->
+        replay_records(Tail, Topic, Queue, NextId);
       {publish, _Other} -> replay_records(Tail, Topic, Queue, NextId);
       _ -> {error, invalid_journal_record}
     catch _:_ -> {error, invalid_journal_term}
