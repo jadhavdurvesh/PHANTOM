@@ -165,3 +165,30 @@ consumer_prefetch_limit_test_() ->
         after 1000 -> ?assert(false)
         end
       end}.
+
+consumer_crash_dead_letter_test_() ->
+    {setup,
+      fun() ->
+        application:load(phantom),
+        application:set_env(phantom, max_delivery_attempts, 1),
+        {ok, _} = application:ensure_all_started(phantom),
+        ok
+      end,
+      fun(_) -> application:stop(phantom) end,
+      fun(_) ->
+        Topic = <<"dead-letter.crash">>,
+        Parent = self(),
+        Consumer = spawn(fun() ->
+          receive {phantom_message, Topic, _Id, _Payload} -> Parent ! delivered end
+        end),
+        ok = phantom:subscribe(Topic, Consumer),
+        {ok, _Id} = phantom:publish(Topic, terminal, #{}),
+        receive delivered -> ok after 1000 -> ?assert(false) end,
+        Ref = erlang:monitor(process, Consumer),
+        exit(Consumer, kill),
+        receive {'DOWN', Ref, process, Consumer, _} -> ok after 1000 -> ?assert(false) end,
+        {ok, Dead} = phantom:dead_letters(Topic),
+        ?assertEqual(1, length(Dead)),
+        [Entry] = Dead,
+        ?assertEqual(consumer_crash, maps:get(dead_letter_reason, Entry))
+      end}.
