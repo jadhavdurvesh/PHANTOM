@@ -1,6 +1,6 @@
 -module(phantom_broker).
 -behaviour(gen_server).
--export([start_link/1, publish/3, subscribe/2, ack/2, stats/1]).
+-export([start_link/1, publish/3, subscribe/2, ack/2, stats/1, dead_letters/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000, prefetch = 10, max_delivery_attempts = 5, dead_letters = [], rr_cursor = 0}).
 
@@ -9,6 +9,7 @@ publish(Pid, Payload, Options) -> gen_server:call(Pid, {publish, Payload, Option
 subscribe(Pid, Consumer) -> gen_server:call(Pid, {subscribe, Consumer}).
 ack(Pid, MessageId) -> gen_server:call(Pid, {ack, MessageId}).
 stats(Pid) -> gen_server:call(Pid, stats).
+dead_letters(Pid) -> gen_server:call(Pid, dead_letters).
 
 init(Topic) ->
     process_flag(trap_exit, true),
@@ -58,6 +59,8 @@ handle_call({ack, Id}, _From, State) ->
           Error -> {reply, Error, State}
         end
     end;
+handle_call(dead_letters, _From, State) ->
+    {reply, lists:reverse(State#state.dead_letters), State};
 handle_call(stats, _From, State) ->
     {reply, #{topic => State#state.topic, queued => queue:len(State#state.queue),
               inflight => map_size(State#state.inflight), subscribers => map_size(State#state.subscribers), prefetch_per_consumer => State#state.prefetch, dead_letters => length(State#state.dead_letters)}, State};
