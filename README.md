@@ -93,3 +93,6 @@ A configurable `max_delivery_attempts` limit (default 5) now bounds redelivery a
 
 Dead-letter records are currently held in broker memory only; they are not journaled and will not survive broker restart. Persistent publish/ack replay does not yet provide durable dead-letter retention.
 
+
+
+Persistent messages that exhaust the configured consumer-crash delivery limit are now recorded as dead-letter journal events. On broker restart, replay removes the original queued message and restores the dead-letter entry. Non-persistent messages remain intentionally memory-only.
