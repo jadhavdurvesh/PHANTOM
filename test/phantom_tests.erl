@@ -169,20 +169,26 @@ consumer_prefetch_limit_test_() ->
 consumer_crash_dead_letter_test_() ->
     {setup,
       fun() ->
+        Dir = filename:join("/tmp", "phantom-dead-letter-" ++ integer_to_list(erlang:unique_integer([positive]))),
         application:load(phantom),
+        application:set_env(phantom, data_dir, Dir),
         application:set_env(phantom, max_delivery_attempts, 1),
         {ok, _} = application:ensure_all_started(phantom),
+        Dir
+      end,
+      fun(Dir) ->
+        application:stop(phantom),
+        _ = file:del_dir_r(Dir),
         ok
       end,
-      fun(_) -> application:stop(phantom) end,
-      fun(_) -> fun() ->
+      fun(_Dir) -> fun() ->
         Topic = <<"dead-letter.crash">>,
         Parent = self(),
         Consumer = spawn(fun() ->
           receive {phantom_message, Topic, _Id, _Payload} -> Parent ! delivered end
         end),
         ok = phantom:subscribe(Topic, Consumer),
-        {ok, _Id} = phantom:publish(Topic, terminal, #{}),
+        {ok, _Id} = phantom:publish(Topic, terminal, #{persistent => true}),
         receive delivered -> ok after 1000 -> ?assert(false) end,
         Ref = erlang:monitor(process, Consumer),
         exit(Consumer, kill),
@@ -190,5 +196,12 @@ consumer_crash_dead_letter_test_() ->
         {ok, Dead} = phantom:dead_letters(Topic),
         ?assertEqual(1, length(Dead)),
         [Entry] = Dead,
-        ?assertEqual(consumer_crash, maps:get(dead_letter_reason, Entry))
+        ?assertEqual(consumer_crash, maps:get(dead_letter_reason, Entry)),
+        application:stop(phantom),
+        {ok, _} = application:ensure_all_started(phantom),
+        {ok, _} = phantom:ensure_topic(Topic),
+        {ok, Recovered} = phantom:dead_letters(Topic),
+        ?assertEqual(1, length(Recovered)),
+        [RecoveredEntry] = Recovered,
+        ?assertEqual(consumer_crash, maps:get(dead_letter_reason, RecoveredEntry))
       end end}.
