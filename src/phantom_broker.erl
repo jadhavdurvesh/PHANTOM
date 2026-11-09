@@ -17,8 +17,8 @@ init(Topic) ->
     Prefetch = max(1, application:get_env(phantom, prefetch_per_consumer, 10)),
     MaxAttempts = max(1, application:get_env(phantom, max_delivery_attempts, 5)),
     case recover_journal(Topic) of
-      {ok, Messages, NextId} ->
-        {ok, #state{topic=Topic, queue=queue:from_list(Messages), max_queue=Max, prefetch=Prefetch, max_delivery_attempts=MaxAttempts, next_id=NextId}};
+      {ok, Messages, DeadLetters, NextId} ->
+        {ok, #state{topic=Topic, queue=queue:from_list(Messages), max_queue=Max, prefetch=Prefetch, max_delivery_attempts=MaxAttempts, dead_letters=DeadLetters, next_id=NextId}};
       {error, Reason} -> {stop, {journal_recovery_failed, Reason}}
     end.
 
@@ -75,7 +75,14 @@ handle_info({'DOWN', _Ref, process, Consumer, _Reason}, State) ->
           Message = maps:get(message,Entry),
           Attempts = maps:get(attempts, Message, 1),
           case Attempts >= State#state.max_delivery_attempts of
-            true -> {R,K,[Message#{dead_letter_reason => consumer_crash, dead_lettered_at => erlang:system_time(millisecond)}|D]};
+            true ->
+              Dead = Message#{dead_letter_reason => consumer_crash, dead_lettered_at => erlang:system_time(millisecond)},
+              case persist_event({dead_letter, State#state.topic, Dead}, maps:get(persistent, Message, false)) of
+                ok -> {R,K,[Dead|D]};
+                Error ->
+                  logger:error("PHANTOM could not persist dead-letter transition: ~p", [Error]),
+                  {[{Id,Message}|R],K,D}
+              end;
             false -> {[{Id,Message}|R], K, D}
           end;
         false -> {R,maps:put(Id,Entry,K),D}
@@ -137,24 +144,24 @@ persist_event(Event, true) ->
 
 recover_journal(Topic) ->
     case file:read_file(journal_path()) of
-      {error, enoent} -> {ok, [], 1};
+      {error, enoent} -> {ok, [], [], 1};
       {error, Reason} -> {error, Reason};
-      {ok, Data} -> replay_records(Data, Topic, queue:new(), 1)
+      {ok, Data} -> replay_records(Data, Topic, queue:new(), [], 1)
     end.
 
-replay_records(<<>>, _Topic, Queue, NextId) -> {ok, queue:to_list(Queue), NextId};
-replay_records(<<Length:32/unsigned-big, Rest/binary>>, Topic, Queue, NextId)
+replay_records(<<>>, _Topic, Queue, Dead, NextId) -> {ok, queue:to_list(Queue), Dead, NextId};
+replay_records(<<Length:32/unsigned-big, Rest/binary>>, Topic, Queue, Dead, NextId)
   when Length > 0, byte_size(Rest) >= Length ->
     <<Encoded:Length/binary, Tail/binary>> = Rest,
     try binary_to_term(Encoded, [safe]) of
       {publish, #{id := Id, topic := Topic}=Message} when is_integer(Id), Id > 0 ->
-        replay_records(Tail, Topic, queue:in(Message, Queue), max(NextId, Id+1));
+        replay_records(Tail, Topic, queue:in(Message, Queue), Dead, max(NextId, Id+1));
       {ack, Topic, Id} when is_integer(Id) ->
-        replay_records(Tail, Topic, queue:from_list([M || M <- queue:to_list(Queue), maps:get(id,M) =/= Id]), NextId);
+        replay_records(Tail, Topic, queue:from_list([M || M <- queue:to_list(Queue), maps:get(id,M) =/= Id]), Dead, NextId);
       {ack, _OtherTopic, _Id} ->
-        replay_records(Tail, Topic, Queue, NextId);
+        replay_records(Tail, Topic, Queue, Dead, NextId);
       {publish, _Other} -> replay_records(Tail, Topic, Queue, NextId);
       _ -> {error, invalid_journal_record}
     catch _:_ -> {error, invalid_journal_term}
     end;
-replay_records(_Truncated, _Topic, _Queue, _NextId) -> {error, truncated_journal_record}.
+replay_records(_Truncated, _Topic, _Queue, _Dead, _NextId) -> {error, truncated_journal_record}.
