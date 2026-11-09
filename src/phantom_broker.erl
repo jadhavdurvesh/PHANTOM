@@ -160,7 +160,12 @@ replay_records(<<Length:32/unsigned-big, Rest/binary>>, Topic, Queue, Dead, Next
         replay_records(Tail, Topic, queue:from_list([M || M <- queue:to_list(Queue), maps:get(id,M) =/= Id]), Dead, NextId);
       {ack, _OtherTopic, _Id} ->
         replay_records(Tail, Topic, Queue, Dead, NextId);
-      {publish, _Other} -> replay_records(Tail, Topic, Queue, NextId);
+      {publish, _Other} -> replay_records(Tail, Topic, Queue, Dead, NextId);
+      {dead_letter, Topic, Message=#{id := Id}} when is_integer(Id) ->
+        Remaining = queue:from_list([M || M <- queue:to_list(Queue), maps:get(id,M) =/= Id]),
+        replay_records(Tail, Topic, Remaining, [Message|Dead], NextId);
+      {dead_letter, _OtherTopic, _Message} ->
+        replay_records(Tail, Topic, Queue, Dead, NextId);
       _ -> {error, invalid_journal_record}
     catch _:_ -> {error, invalid_journal_term}
     end;
