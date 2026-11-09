@@ -1,5 +1,5 @@
 -module(phantom).
--export([start/0, ensure_topic/1, publish/3, subscribe/2, ack/2, stats/1, dead_letters/1, topics/0]).
+-export([start/0, ensure_topic/1, publish/3, subscribe/2, ack/2, stats/1, dead_letters/1, redrive/2, topics/0]).
 start() -> application:ensure_all_started(phantom).
 ensure_topic(Topic) ->
     case phantom_registry:ensure_topic(Topic) of
@@ -29,6 +29,11 @@ stats(Topic) ->
 dead_letters(Topic) ->
     case phantom_registry:lookup(Topic) of
       {ok, Pid} -> {ok, phantom_broker:dead_letters(Pid)};
+      not_found -> {error, unknown_topic}
+    end.
+redrive(Topic, Id) ->
+    case phantom_registry:lookup(Topic) of
+      {ok, Pid} -> phantom_broker:redrive(Pid, Id);
       not_found -> {error, unknown_topic}
     end.
 topics() -> phantom_registry:topics().
