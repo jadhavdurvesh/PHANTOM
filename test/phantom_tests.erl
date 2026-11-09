@@ -203,5 +203,17 @@ consumer_crash_dead_letter_test_() ->
         {ok, Recovered} = phantom:dead_letters(Topic),
         ?assertEqual(1, length(Recovered)),
         [RecoveredEntry] = Recovered,
-        ?assertEqual(consumer_crash, maps:get(dead_letter_reason, RecoveredEntry))
+        ?assertEqual(consumer_crash, maps:get(dead_letter_reason, RecoveredEntry)),
+        ok = phantom:subscribe(Topic, self()),
+        ?assertEqual(ok, phantom:redrive(Topic, _Id)),
+        receive
+          {phantom_message, Topic, _Id, terminal} ->
+            ?assertEqual(ok, phantom:ack(Topic, _Id))
+        after 1000 -> ?assert(false)
+        end,
+        application:stop(phantom),
+        {ok, _} = application:ensure_all_started(phantom),
+        {ok, _} = phantom:ensure_topic(Topic),
+        {ok, []} = phantom:dead_letters(Topic),
+        ?assertEqual(0, maps:get(queued, phantom:stats(Topic)))
       end end}.
