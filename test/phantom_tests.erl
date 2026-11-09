@@ -207,8 +207,8 @@ consumer_crash_dead_letter_test_() ->
         ok = phantom:subscribe(Topic, self()),
         ?assertEqual(ok, phantom:redrive(Topic, _Id)),
         receive
-          {phantom_message, Topic, _Id, terminal} ->
-            ?assertEqual(ok, phantom:ack(Topic, _Id))
+          {phantom_message, Topic, RedrivenId, terminal} ->
+            ?assertEqual(ok, phantom:ack(Topic, RedrivenId))
         after 1000 -> ?assert(false)
         end,
         application:stop(phantom),
