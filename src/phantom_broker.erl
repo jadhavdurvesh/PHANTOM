@@ -1,6 +1,6 @@
 -module(phantom_broker).
 -behaviour(gen_server).
--export([start_link/1, publish/3, subscribe/2, ack/2, stats/1, dead_letters/1]).
+-export([start_link/1, publish/3, subscribe/2, ack/2, stats/1, dead_letters/1, redrive/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -record(state, {topic, queue = undefined, subscribers = #{}, inflight = #{}, next_id = 1, max_queue = 10000, prefetch = 10, max_delivery_attempts = 5, dead_letters = [], rr_cursor = 0}).
 
@@ -10,6 +10,7 @@ subscribe(Pid, Consumer) -> gen_server:call(Pid, {subscribe, Consumer}).
 ack(Pid, MessageId) -> gen_server:call(Pid, {ack, MessageId}).
 stats(Pid) -> gen_server:call(Pid, stats).
 dead_letters(Pid) -> gen_server:call(Pid, dead_letters).
+redrive(Pid, Id) -> gen_server:call(Pid, {redrive, Id}).
 
 init(Topic) ->
     process_flag(trap_exit, true),
@@ -61,6 +62,18 @@ handle_call({ack, Id}, _From, State) ->
     end;
 handle_call(dead_letters, _From, State) ->
     {reply, lists:reverse(State#state.dead_letters), State};
+handle_call({redrive, Id}, _From, State) when is_integer(Id) ->
+    case lists:partition(fun(Message) -> maps:get(id, Message) =:= Id end, State#state.dead_letters) of
+      {[], _} -> {reply, {error, unknown_dead_letter}, State};
+      {[Message], Remaining} ->
+        case persist_event({redrive, State#state.topic, Id}, maps:get(persistent, Message, false)) of
+          ok ->
+            Requeued = maps:remove(dead_letter_reason, maps:remove(dead_lettered_at, Message)),
+            Next = dispatch(State#state{dead_letters=Remaining, queue=queue:in(Requeued, State#state.queue)}),
+            {reply, ok, Next};
+          Error -> {reply, Error, State}
+        end
+    end;
 handle_call(stats, _From, State) ->
     {reply, #{topic => State#state.topic, queued => queue:len(State#state.queue),
               inflight => map_size(State#state.inflight), subscribers => map_size(State#state.subscribers), prefetch_per_consumer => State#state.prefetch, dead_letters => length(State#state.dead_letters)}, State};
@@ -165,6 +178,15 @@ replay_records(<<Length:32/unsigned-big, Rest/binary>>, Topic, Queue, Dead, Next
         Remaining = queue:from_list([M || M <- queue:to_list(Queue), maps:get(id,M) =/= Id]),
         replay_records(Tail, Topic, Remaining, [Message|Dead], NextId);
       {dead_letter, _OtherTopic, _Message} ->
+        replay_records(Tail, Topic, Queue, Dead, NextId);
+      {redrive, Topic, Id} when is_integer(Id) ->
+        case lists:keytake(Id, 1, [{maps:get(id,M),M} || M <- Dead]) of
+          {value, {_Id, Message}, _Rest} ->
+            DeadRemaining = [M || M <- Dead, maps:get(id,M) =/= Id],
+            replay_records(Tail, Topic, queue:in(Message, Queue), DeadRemaining, NextId);
+          false -> {error, redrive_missing_dead_letter}
+        end;
+      {redrive, _OtherTopic, _Id} ->
         replay_records(Tail, Topic, Queue, Dead, NextId);
       _ -> {error, invalid_journal_record}
     catch _:_ -> {error, invalid_journal_term}
